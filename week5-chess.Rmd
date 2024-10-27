@@ -1,0 +1,145 @@
+---
+title: "week5-ChessRatings"
+author: "Emin Allen"
+output: html_document 
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Intro
+In this project we are given a text file with chess tournament results where the information has some structure. The goal of this project is to structure and tidy the data into a CSV file. 
+
+The reason we would want the data tidy in a CSV file is because originally the text file is written in such a way as to be easily inferred by a person reading it, but not a machine. For example, it has multiple lines for the same player, ambiguous delimiters, and mixed data types such as text + numeric (e.g. W 39). 
+
+# First we load the text file containing tournament data
+```{r}
+# Load tournament data
+tournament_data <- read.table("https://raw.githubusercontent.com/Emin-NYC/DATA607-week5project/refs/heads/main/tournamentinfo.txt", sep = "\n", stringsAsFactors = FALSE, fill = TRUE)
+tournament_data <- as.character(tournament_data$V1)
+
+# Print first few rows
+print(head(tournament_data, 20))
+```
+
+# After loading the text file, we clean the data by removing unnecessary rows
+```{r}
+clean_data <- tournament_data[5:length(tournament_data)]
+clean_data <- clean_data[!grepl("-{10,}", clean_data)]
+```
+
+# After cleaning the data, we create empty lists (vectors) to store extracted info like player names, states, points scored, ratings, and opponents. 
+```{r}
+player_names <- c()
+player_states <- c()
+total_points <- c()
+pre_ratings <- c()
+opponents <- list()
+```
+
+
+# After initializing our vectors, we extract the relevant information for each player by looping  through the cleaned data two lines at a time because each player's data takes up two lines.
+```{r}
+for (i in seq(1, length(clean_data), by = 2)) {
+  if ((i + 1) > length(clean_data)) next
+
+  # First line has player details (e.g. name and points scored)
+  info_line <- clean_data[i]
+  
+  # Second line has player's rating.
+  rating_line <- clean_data[i + 1]
+
+  # Split the lines into parts using "\\|" as delimiter
+  info_parts <- unlist(strsplit(info_line, "\\|"))
+  rating_parts <- unlist(strsplit(rating_line, "\\|"))
+
+  # Extract player name from part of info line
+  name <- trimws(info_parts[2])
+  if (name == "") {
+    print(paste("Skipping due to missing name at line", i))
+    next
+  }
+
+  # Extract player's total points in tournament
+  points <- as.numeric(gsub("[^0-9.]", "", info_parts[3]))
+  if (is.na(points)) {
+    print(paste("Skipping due to missing points for player:", name))
+    next
+  }
+
+  # Extract player state from part of second line
+  state <- trimws(rating_parts[1])
+  if (state == "") {
+    print(paste("Skipping due to missing state for player:", name))
+    next
+  }
+
+  # Extract the player's rating before tournament
+  pre_rating_text <- sub(".*R: *([0-9]+).*", "\\1", rating_parts[2])
+  pre_rating <- as.numeric(pre_rating_text)
+  if (is.na(pre_rating)) {
+    print(paste("Skipping due to missing or incorrect pre-rating for player:", name))
+    next
+  }
+
+  # Extract opponent numbers using a more reliable method
+  opponent_numbers <- gsub("[A-Za-z]", "", paste(info_parts[4:length(info_parts)], collapse = " "))  # Remove all alphabetic characters
+  opponent_numbers <- trimws(unlist(strsplit(opponent_numbers, " +")))  # Split by spaces
+  opponent_numbers <- opponent_numbers[opponent_numbers != ""]  # Remove empty values
+  opponent_numbers <- as.numeric(opponent_numbers)  # Convert to numeric
+  opponent_numbers <- opponent_numbers[!is.na(opponent_numbers)]  # Remove NA values
+
+  # Append extracted information to lists we created earlier
+  player_names <- c(player_names, name)
+  player_states <- c(player_states, state)
+  total_points <- c(total_points, points)
+  pre_ratings <- c(pre_ratings, pre_rating)
+  opponents[[length(opponents) + 1]] <- opponent_numbers
+}
+
+
+# Calculate average opponent ratings
+avg_opponent_ratings <- c()
+
+# For each player, calculate average rating of opponents they played against
+for (i in seq_along(opponents)) {
+  # Get opponent indices for current player
+  opp_indices <- opponents[[i]]
+  
+  # Make sure opponent indices are valid (within list of all players)
+  opp_indices <- opp_indices[!is.na(opp_indices) & opp_indices > 0 & opp_indices <= length(pre_ratings)]
+
+  if (length(opp_indices) == 0) {
+    avg_rating <- NA  # Set to NA if no valid opponents are found
+  } else {
+    opp_ratings <- pre_ratings[opp_indices]
+    avg_rating <- round(mean(opp_ratings, na.rm = TRUE))
+  }
+  
+  avg_opponent_ratings <- c(avg_opponent_ratings, avg_rating)
+}
+```
+
+
+# Finally, we create the final dataframe and remove NA values
+```{r}
+final_df <- data.frame(
+  Player_Name = player_names,
+  Player_State = player_states,
+  Total_Points = total_points,
+  Player_Pre_Rating = pre_ratings,
+  Avg_Pre_Chess_Rating = avg_opponent_ratings
+)
+
+# Remove any rows where total points are NA
+final_df <- final_df[!is.na(final_df$Total_Points), ]
+
+# Write the dataframe to a CSV file
+write.csv(final_df, "chess_tournament_results.csv", row.names = FALSE)
+  
+# Print final dataframe
+print(final_df)
+```
